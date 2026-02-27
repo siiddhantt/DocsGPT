@@ -1,4 +1,5 @@
-import { SyntheticEvent, useRef, useEffect, CSSProperties } from 'react';
+import { CSSProperties, SyntheticEvent, useEffect, useRef } from 'react';
+
 import type { LucideIcon } from 'lucide-react';
 
 export interface MenuOption {
@@ -159,7 +160,10 @@ export default function ContextMenu({
                     const Icon = option.icon as LucideIcon;
                     return (
                       <Icon
-                        size={Math.max(option.iconWidth || 16, option.iconHeight || 16)}
+                        size={Math.max(
+                          option.iconWidth || 16,
+                          option.iconHeight || 16,
+                        )}
                         strokeWidth={1.75}
                         aria-hidden="true"
                         className={`cursor-pointer ${option.iconClassName || ''}`}
@@ -169,7 +173,7 @@ export default function ContextMenu({
                 )}
               </div>
             )}
-            <span className="break-words hyphens-auto">{option.label}</span>
+            <span className="wrap-break-word hyphens-auto">{option.label}</span>
           </button>
         ))}
       </div>

@@ -13,8 +13,8 @@ import Trash from '../assets/trash.svg';
 import ConfigFields from '../components/ConfigFields';
 import Dropdown from '../components/Dropdown';
 import Input from '../components/Input';
-import { Input as ShadInput } from '../components/ui/input';
 import ToggleSwitch from '../components/ToggleSwitch';
+import { Input as ShadInput } from '../components/ui/input';
 import { useDarkTheme } from '../hooks';
 import AddActionModal from '../modals/AddActionModal';
 import ConfirmationModal from '../modals/ConfirmationModal';
@@ -143,7 +143,11 @@ export default function ToolConfig({
           newErrors[key] = `${spec.label || key} is required`;
         }
       }
-      if (spec.type === 'number' && configValues[key] !== undefined && configValues[key] !== '') {
+      if (
+        spec.type === 'number' &&
+        configValues[key] !== undefined &&
+        configValues[key] !== ''
+      ) {
         const num = Number(configValues[key]);
         if (isNaN(num) || num < 1) {
           newErrors[key] = 'Must be a positive number';
