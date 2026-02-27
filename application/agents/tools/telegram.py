@@ -82,5 +82,12 @@ class TelegramTool(Tool):
 
     def get_config_requirements(self):
         return {
-            "token": {"type": "string", "description": "Bot token for authentication"},
+            "token": {
+                "type": "string",
+                "label": "Bot Token",
+                "description": "Telegram bot token for authentication",
+                "required": True,
+                "secret": True,
+                "order": 1,
+            },
         }

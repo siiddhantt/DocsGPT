@@ -1,24 +1,25 @@
+import { RefreshCcw, Trash } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSelector } from 'react-redux';
 
 import userService from '../api/services/userService';
-import ThreeDotsIcon from '../assets/three-dots.svg';
-import NoFilesIcon from '../assets/no-files.svg';
+import Edit from '../assets/edit.svg';
 import NoFilesDarkIcon from '../assets/no-files-dark.svg';
+import NoFilesIcon from '../assets/no-files.svg';
+import ThreeDotsIcon from '../assets/three-dots.svg';
+import ContextMenu, { MenuOption } from '../components/ContextMenu';
 import Input from '../components/Input';
 import Spinner from '../components/Spinner';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useDarkTheme } from '../hooks';
 import AddToolModal from '../modals/AddToolModal';
+import ConfirmationModal from '../modals/ConfirmationModal';
+import MCPServerModal from '../modals/MCPServerModal';
 import { ActiveState } from '../models/misc';
 import { selectToken } from '../preferences/preferenceSlice';
 import ToolConfig from './ToolConfig';
 import { APIToolType, UserToolType } from './types';
-import ContextMenu, { MenuOption } from '../components/ContextMenu';
-import Edit from '../assets/edit.svg';
-import Trash from '../assets/red-trash.svg';
-import ConfirmationModal from '../modals/ConfirmationModal';
 
 export default function Tools() {
   const { t } = useTranslation();
@@ -42,6 +43,9 @@ export default function Tools() {
   const [toolToDelete, setToolToDelete] = React.useState<UserToolType | null>(
     null,
   );
+  const [reconnectModalState, setReconnectModalState] =
+    React.useState<ActiveState>('INACTIVE');
+  const [reconnectTool, setReconnectTool] = React.useState<any>(null);
 
   React.useEffect(() => {
     userTools.forEach((tool) => {
@@ -66,24 +70,55 @@ export default function Tools() {
     }
   };
 
-  const getMenuOptions = (tool: UserToolType): MenuOption[] => [
-    {
-      icon: Edit,
-      label: t('settings.tools.edit'),
-      onClick: () => handleSettingsClick(tool),
-      variant: 'primary',
-      iconWidth: 14,
-      iconHeight: 14,
-    },
-    {
-      icon: Trash,
-      label: t('settings.tools.delete'),
-      onClick: () => handleDeleteTool(tool),
-      variant: 'danger',
-      iconWidth: 12,
-      iconHeight: 12,
-    },
-  ];
+  const handleReconnect = (tool: UserToolType) => {
+    const config = tool.config as Record<string, any>;
+    const oauthScopes = Array.isArray(config.oauth_scopes)
+      ? config.oauth_scopes.join(', ')
+      : config.oauth_scopes || '';
+    setReconnectTool({
+      id: tool.id,
+      displayName: tool.customName || tool.displayName,
+      server_url: config.server_url || '',
+      auth_type: config.auth_type || 'none',
+      timeout: config.timeout || 30,
+      oauth_scopes: oauthScopes,
+      has_encrypted_credentials: !!config.has_encrypted_credentials,
+    });
+    setReconnectModalState('ACTIVE');
+  };
+
+  const getMenuOptions = (tool: UserToolType): MenuOption[] => {
+    const options: MenuOption[] = [
+      {
+        icon: Edit,
+        label: t('settings.tools.edit'),
+        onClick: () => handleSettingsClick(tool),
+        variant: 'primary',
+        iconWidth: 14,
+        iconHeight: 14,
+      },
+      {
+        icon: Trash,
+        label: t('settings.tools.delete'),
+        onClick: () => handleDeleteTool(tool),
+        variant: 'danger',
+        iconWidth: 16,
+        iconHeight: 16,
+      },
+    ];
+    if (tool.name === 'mcp_tool') {
+      options.splice(1, 0, {
+        icon: RefreshCcw,
+        label: t('settings.tools.reconnect'),
+        onClick: () => handleReconnect(tool),
+        variant: 'primary',
+        iconWidth: 16,
+        iconHeight: 16,
+        iconClassName: 'text-[#747474]',
+      });
+    }
+    return options;
+  };
 
   const getUserTools = () => {
     setLoading(true);
@@ -171,7 +206,7 @@ export default function Tools() {
                 />
               </div>
               <button
-                className="bg-purple-30 hover:bg-violets-are-blue flex h-[32px] min-w-[108px] items-center justify-center rounded-full px-4 text-sm whitespace-normal text-white"
+                className="bg-purple-30 hover:bg-violets-are-blue flex h-8 min-w-[108px] items-center justify-center rounded-full px-4 text-sm whitespace-normal text-white"
                 onClick={() => {
                   setAddToolModalState('ACTIVE');
                 }}
@@ -209,7 +244,7 @@ export default function Tools() {
                     .map((tool, index) => (
                       <div
                         key={index}
-                        className="relative flex h-52 w-[300px] flex-col justify-between rounded-2xl bg-[#F5F5F5] p-6 hover:bg-[#ECECEC] dark:bg-[#383838] dark:hover:bg-[#303030]"
+                        className="relative flex h-52 w-[300px] flex-col justify-between overflow-hidden rounded-2xl bg-[#F5F5F5] p-6 hover:bg-[#ECECEC] dark:bg-[#383838] dark:hover:bg-[#303030]"
                       >
                         <div
                           ref={menuRefs.current[tool.id]}
@@ -252,7 +287,10 @@ export default function Tools() {
                             >
                               {tool.customName || tool.displayName}
                             </p>
-                            <p className="text-old-silver dark:text-sonic-silver-light mt-1 h-24 overflow-auto px-1 text-[12px] leading-relaxed">
+                            <p
+                              className="text-old-silver dark:text-sonic-silver-light mt-1 line-clamp-4 max-h-24 overflow-hidden px-1 text-[12px] leading-relaxed break-all"
+                              title={tool.description}
+                            >
                               {tool.description}
                             </p>
                           </div>
@@ -293,6 +331,15 @@ export default function Tools() {
             handleSubmit={confirmDeleteTool}
             submitLabel={t('settings.tools.delete')}
             variant="danger"
+          />
+          <MCPServerModal
+            modalState={reconnectModalState}
+            setModalState={setReconnectModalState}
+            server={reconnectTool}
+            onServerSaved={() => {
+              setReconnectTool(null);
+              getUserTools();
+            }}
           />
         </div>
       )}

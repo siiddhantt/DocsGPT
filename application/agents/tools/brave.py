@@ -177,6 +177,10 @@ class BraveSearchTool(Tool):
         return {
             "token": {
                 "type": "string",
+                "label": "API Key",
                 "description": "Brave Search API key for authentication",
+                "required": True,
+                "secret": True,
+                "order": 1,
             },
         }

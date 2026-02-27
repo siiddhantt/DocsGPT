@@ -1,7 +1,7 @@
 """Tool management MCP server integration."""
 
 import json
-from urllib.parse import unquote, urlencode
+from urllib.parse import urlencode
 
 from bson.objectid import ObjectId
 from flask import current_app, jsonify, make_response, redirect, request
@@ -10,8 +10,9 @@ from flask_restx import fields, Namespace, Resource
 from application.agents.tools.mcp_tool import MCPOAuthManager, MCPTool
 from application.api import api
 from application.api.user.base import user_tools_collection
+from application.api.user.tools.routes import transform_actions
 from application.cache import get_redis_instance
-from application.security.encryption import encrypt_credentials
+from application.security.encryption import decrypt_credentials, encrypt_credentials
 from application.utils import check_required_fields
 
 tools_mcp_ns = Namespace("tools", description="Tool management operations", path="/api")
@@ -74,7 +75,9 @@ class TestMCPServerConfig(Resource):
             mcp_tool = MCPTool(config=test_config, user_id=user)
             result = mcp_tool.test_connection()
 
-            # Sanitize the response to avoid exposing internal error details
+            if result.get("requires_oauth"):
+                return make_response(jsonify(result), 200)
+
             if not result.get("success") and "message" in result:
                 current_app.logger.error(f"MCP connection test failed: {result.get('message')}")
                 result["message"] = "Connection test failed"
@@ -188,30 +191,39 @@ class MCPServerSave(Resource):
                     "No valid credentials provided for the selected authentication type"
                 )
             storage_config = config.copy()
+
+            tool_id = data.get("id")
+            existing_encrypted = None
+            if tool_id:
+                existing_doc = user_tools_collection.find_one(
+                    {"_id": ObjectId(tool_id), "user": user, "name": "mcp_tool"}
+                )
+                if existing_doc:
+                    existing_encrypted = existing_doc.get("config", {}).get(
+                        "encrypted_credentials"
+                    )
+
             if auth_credentials:
-                encrypted_credentials_string = encrypt_credentials(
+                if existing_encrypted:
+                    existing_secrets = decrypt_credentials(existing_encrypted, user)
+                    existing_secrets.update(auth_credentials)
+                    auth_credentials = existing_secrets
+                storage_config["encrypted_credentials"] = encrypt_credentials(
                     auth_credentials, user
                 )
-                storage_config["encrypted_credentials"] = encrypted_credentials_string
+            elif existing_encrypted:
+                storage_config["encrypted_credentials"] = existing_encrypted
+
             for field in [
                 "api_key",
                 "bearer_token",
                 "username",
                 "password",
                 "api_key_header",
+                "redirect_uri",
             ]:
                 storage_config.pop(field, None)
-            transformed_actions = []
-            for action in actions_metadata:
-                action["active"] = True
-                if "parameters" in action:
-                    if "properties" in action["parameters"]:
-                        for param_name, param_details in action["parameters"][
-                            "properties"
-                        ].items():
-                            param_details["filled_by_llm"] = True
-                            param_details["value"] = ""
-                transformed_actions.append(action)
+            transformed_actions = transform_actions(actions_metadata)
             tool_data = {
                 "name": "mcp_tool",
                 "displayName": data["displayName"],
@@ -223,7 +235,6 @@ class MCPServerSave(Resource):
                 "user": user,
             }
 
-            tool_id = data.get("id")
             if tool_id:
                 result = user_tools_collection.update_one(
                     {"_id": ObjectId(tool_id), "user": user, "name": "mcp_tool"},
@@ -304,7 +315,6 @@ class MCPOAuthCallback(Resource):
                 return redirect(
                     "/api/connectors/callback-status?status=error&message=Internal+server+error:+Redis+not+available.&provider=mcp_tool"
                 )
-            code = unquote(code)
             manager = MCPOAuthManager(redis_client)
             success = manager.handle_oauth_callback(state, code, error)
             if success:
@@ -327,10 +337,6 @@ class MCPOAuthCallback(Resource):
 @tools_mcp_ns.route("/mcp_server/oauth_status/<string:task_id>")
 class MCPOAuthStatus(Resource):
     def get(self, task_id):
-        """
-        Get current status of OAuth flow.
-        Frontend should poll this endpoint periodically.
-        """
         try:
             redis_client = get_redis_instance()
             status_key = f"mcp_oauth_status:{task_id}"
@@ -338,6 +344,11 @@ class MCPOAuthStatus(Resource):
 
             if status_data:
                 status = json.loads(status_data)
+                if "tools" in status and isinstance(status["tools"], list):
+                    status["tools"] = [
+                        {"name": t.get("name", "unknown"), "description": t.get("description", "")}
+                        for t in status["tools"]
+                    ]
                 return make_response(
                     jsonify({"success": True, "task_id": task_id, **status})
                 )
@@ -345,12 +356,13 @@ class MCPOAuthStatus(Resource):
                 return make_response(
                     jsonify(
                         {
-                            "success": False,
-                            "error": "Task not found or expired",
+                            "success": True,
                             "task_id": task_id,
+                            "status": "pending",
+                            "message": "Waiting for OAuth to start...",
                         }
                     ),
-                    404,
+                    200,
                 )
         except Exception as e:
             current_app.logger.error(
